@@ -26,7 +26,7 @@ export const config = {
 
   /** Admin bootstrap account for the dashboard. */
   adminEmail: process.env.ADMIN_EMAIL ?? 'admin@localhost',
-  adminPassword: process.env.ADMIN_PASSWORD ?? 'change-me',
+  adminPassword: required('ADMIN_PASSWORD', process.env.NODE_ENV === 'production' ? undefined : 'change-me'),
 
   providers: {
     google: {
