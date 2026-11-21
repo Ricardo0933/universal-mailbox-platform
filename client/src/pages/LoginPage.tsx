@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { Banner, ThemeToggle } from '../components/ui';
 
-export default function LoginPage({ onSignedIn }: { onSignedIn: () => void }) {
+export default function LoginPage({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +16,7 @@ export default function LoginPage({ onSignedIn }: { onSignedIn: () => void }) {
     setError(null);
     try {
       await api.login(email, password);
-      onSignedIn();
+      await onSignedIn();
       navigate('/dashboard');
     } catch (err: any) {
       setError(err.message ?? 'Sign-in failed');
