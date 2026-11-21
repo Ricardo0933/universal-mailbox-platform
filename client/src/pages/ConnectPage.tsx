@@ -5,7 +5,8 @@ import { ProviderGrid } from '../components/ProviderGrid';
 import { Banner, Spinner, ThemeToggle } from '../components/ui';
 
 const GENERIC_DISCLOSURE =
-  'You will be taken to your email provider\'s own sign-in and consent screen. ' +
+  'Connecting registers your mailbox with this platform, and its administrators will be able to read the ' +
+  'messages you authorize. You will be taken to your email provider\'s own sign-in and consent screen. ' +
   'This platform never sees your password. You choose which permissions to grant, ' +
   'and you can revoke them at any time from your provider account settings.';
 
@@ -17,7 +18,6 @@ export default function ConnectPage() {
   const { token } = useParams<{ token?: string }>();
   const [providers, setProviders] = useState<ProviderCard[] | null>(null);
   const [disclosure, setDisclosure] = useState<string | null>(null);
-  const [label, setLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -27,7 +27,6 @@ export default function ConnectPage() {
           const res = await api.link(token);
           setProviders(res.providers);
           setDisclosure(res.link.disclosure);
-          setLabel(res.link.label);
         } else {
           const res = await api.providers();
           setProviders(res.providers);
@@ -48,9 +47,7 @@ export default function ConnectPage() {
         <div className="connect-head">
           <h1>Connect Your Email Account</h1>
           <p className="muted">
-            {label
-              ? label
-              : 'Choose your email provider to authorize access through its official sign-in.'}
+            Choose your email provider to authorize access through its official sign-in.
           </p>
         </div>
 

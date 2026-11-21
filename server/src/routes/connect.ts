@@ -44,7 +44,6 @@ connectRouter.get('/links/:token', (req, res) => {
   res.json({
     link: {
       token: link.token,
-      label: link.label,
       disclosure: link.disclosure,
     },
     providers: describeProviders(),
