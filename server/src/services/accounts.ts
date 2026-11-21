@@ -102,6 +102,14 @@ export function getAccount(accountId: number): AccountRow | undefined {
     | undefined;
 }
 
+/** Guards against a revoke/disconnect that completed while a provider call was in flight. */
+function assertStillAuthorized(accountId: number): void {
+  const tokens = db.prepare('SELECT 1 FROM oauth_tokens WHERE account_id = ?').get(accountId);
+  if (!tokens || !hasMailReadPermission(accountId)) {
+    throw new Error('Authorization was revoked during synchronization');
+  }
+}
+
 async function validAccessToken(account: AccountRow): Promise<string> {
   const row = db.prepare('SELECT * FROM oauth_tokens WHERE account_id = ?').get(account.id) as any;
   if (!row) throw new Error('No stored authorization for this mailbox');
@@ -116,6 +124,7 @@ async function validAccessToken(account: AccountRow): Promise<string> {
     throw new Error('Authorization expired; the account owner must reconnect');
   }
   const refreshed = await provider.refresh(decryptSecret(row.refresh_token_encrypted));
+  assertStillAuthorized(account.id);
   storeTokens(account.id, refreshed);
   return refreshed.accessToken;
 }
@@ -147,6 +156,7 @@ export async function syncAccount(
   try {
     const token = await validAccessToken(account);
     const messages = await provider.listMessages(token, options.limit ?? 25);
+    assertStillAuthorized(accountId);
 
     const insertMessage = db.prepare(
       `INSERT INTO messages (account_id, provider_message_id, thread_id, subject, from_name, from_address,
@@ -213,7 +223,10 @@ export async function syncAccount(
     db.prepare(
       `UPDATE synchronization_logs SET finished_at = datetime('now'), status = 'error', error_message = ? WHERE id = ?`,
     ).run(String(err.message ?? err), logId);
-    setStatus(accountId, 'synchronization_error', String(err.message ?? err));
+    const current = getAccount(accountId)?.status;
+    if (current !== 'permission_revoked' && current !== 'disconnected') {
+      setStatus(accountId, 'synchronization_error', String(err.message ?? err));
+    }
     recordAudit({
       actor: options.actor ?? 'system',
       action: 'mailbox.sync_failed',
