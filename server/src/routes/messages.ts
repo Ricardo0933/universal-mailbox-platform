@@ -31,8 +31,8 @@ messagesRouter.get('/', (req, res) => {
     params.push(Number(accountId));
   }
   if (q) {
-    where.push('(m.subject LIKE ? OR m.from_address LIKE ? OR m.snippet LIKE ?)');
-    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+    where.push('(m.subject LIKE ? OR m.from_name LIKE ? OR m.from_address LIKE ? OR m.snippet LIKE ?)');
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
   if (unread === 'true') where.push('m.is_read = 0');
 
