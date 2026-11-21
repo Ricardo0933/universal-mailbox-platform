@@ -14,6 +14,19 @@ import {
 export const connectRouter = Router();
 
 const STATE_TTL_MINUTES = 10;
+const STATE_COOKIE = 'ump_oauth_state';
+
+/** Returns why a connection link can no longer be used, or null if it is usable. */
+function linkProblem(link: any): { status: number; error: string } | null {
+  if (!link || link.revoked_at) return { status: 404, error: 'This connection link is no longer valid.' };
+  if (link.expires_at && new Date(link.expires_at).getTime() < Date.now()) {
+    return { status: 410, error: 'This connection link has expired.' };
+  }
+  if (link.max_uses !== null && link.use_count >= link.max_uses) {
+    return { status: 410, error: 'This connection link has already been used.' };
+  }
+  return null;
+}
 
 /** Provider cards for the connection page. */
 connectRouter.get('/providers', (_req, res) => {
@@ -29,16 +42,9 @@ connectRouter.get('/links/:token', (req, res) => {
     .prepare('SELECT * FROM connection_links WHERE token = ?')
     .get(req.params.token) as any;
 
-  if (!link || link.revoked_at) {
-    res.status(404).json({ error: 'This connection link is no longer valid.' });
-    return;
-  }
-  if (link.expires_at && new Date(link.expires_at).getTime() < Date.now()) {
-    res.status(410).json({ error: 'This connection link has expired.' });
-    return;
-  }
-  if (link.max_uses !== null && link.use_count >= link.max_uses) {
-    res.status(410).json({ error: 'This connection link has already been used.' });
+  const problem = linkProblem(link);
+  if (problem) {
+    res.status(problem.status).json({ error: problem.error });
     return;
   }
   res.json({
@@ -93,8 +99,9 @@ connectRouter.post('/start', (req, res) => {
     const link = db
       .prepare('SELECT * FROM connection_links WHERE token = ?')
       .get(parsed.data.linkToken) as any;
-    if (!link || link.revoked_at) {
-      res.status(404).json({ error: 'This connection link is no longer valid.' });
+    const problem = linkProblem(link);
+    if (problem) {
+      res.status(problem.status).json({ error: problem.error });
       return;
     }
     linkId = link.id;
@@ -125,6 +132,14 @@ connectRouter.post('/start', (req, res) => {
     loginHint: parsed.data.loginHint,
   });
 
+  res.cookie(STATE_COOKIE, state, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: config.env === 'production',
+    maxAge: STATE_TTL_MINUTES * 60_000,
+    path: '/api/oauth',
+  });
+
   recordAudit({
     actor: 'mailbox-owner',
     action: 'authorization.started',
@@ -147,7 +162,14 @@ function resultRedirect(params: Record<string, string>): string {
  */
 connectRouter.get('/oauth/:providerKey/callback', async (req, res) => {
   const providerKey = req.params.providerKey;
-  const { code, state, error, error_description: errorDescription } = req.query as Record<string, string>;
+  const q = req.query;
+  const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  const code = str(q.code);
+  const state = str(q.state);
+  const error = str(q.error);
+  const errorDescription = str(q.error_description);
+  const browserState = req.cookies?.[STATE_COOKIE];
+  res.clearCookie(STATE_COOKIE, { path: '/api/oauth' });
 
   if (error) {
     recordAudit({
@@ -180,6 +202,12 @@ connectRouter.get('/oauth/:providerKey/callback', async (req, res) => {
     res.redirect(resultRedirect({ status: 'error', provider: providerKey, message: 'Authorization request expired; please try again' }));
     return;
   }
+  // The authorization must complete in the same browser that started it from the connection page.
+  if (browserState !== state) {
+    recordAudit({ actor: 'mailbox-owner', action: 'authorization.browser_mismatch', target: providerKey, ip: req.ip });
+    res.redirect(resultRedirect({ status: 'error', provider: providerKey, message: 'Please start the connection again from the connection page in this browser' }));
+    return;
+  }
   db.prepare(`UPDATE oauth_authorization_states SET consumed_at = datetime('now') WHERE id = ?`).run(stateRow.id);
 
   const provider = getProvider(stateRow.provider_key);
@@ -199,6 +227,11 @@ connectRouter.get('/oauth/:providerKey/callback', async (req, res) => {
     const requestedScopes: string[] = String(stateRow.requested_scopes).split(' ').filter(Boolean);
 
     const accountId = db.transaction(() => {
+      if (stateRow.connection_link_id) {
+        const link = db.prepare('SELECT * FROM connection_links WHERE id = ?').get(stateRow.connection_link_id);
+        const problem = linkProblem(link);
+        if (problem) throw new Error(problem.error);
+      }
       db.prepare(
         `INSERT INTO connected_accounts
            (provider, provider_key, provider_account_id, email_address, display_name, status, authorized_at, connection_link_id, updated_at)

@@ -82,7 +82,7 @@ export const api = {
 
   providers: () => request<{ providers: ProviderCard[] }>('/connect/providers'),
   link: (token: string) =>
-    request<{ link: { token: string; label: string | null; disclosure: string }; providers: ProviderCard[] }>(
+    request<{ link: { token: string; disclosure: string }; providers: ProviderCard[] }>(
       `/connect/links/${token}`,
     ),
   startConnection: (provider: string, linkToken?: string) =>
